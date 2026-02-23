@@ -432,8 +432,15 @@ function Notebook:hover(opts)
         utils.notify_info("Kernel inspect returned no content")
         return
     end
-    local preview_opts = vim.tbl_extend("force", { border = "rounded" }, opts)
-    vim.lsp.util.open_floating_preview(markdown_lines, "markdown", preview_opts)
+    local preview_opts = vim.tbl_extend("force", { border = "rounded", bufnr = self.bufnr }, opts)
+    local function show_preview()
+        vim.lsp.util.open_floating_preview(markdown_lines, "markdown", preview_opts)
+    end
+    if vim.in_fast_event() then
+        vim.schedule(show_preview)
+    else
+        show_preview()
+    end
 end
 
 function Notebook:run_cell_and_insert_below()
