@@ -468,7 +468,7 @@ const neopyterPlugin: JupyterFrontEndPlugin<void> = {
             {
               code: source,
               cursor_pos: offset,
-              detail_level: 0,
+              detail_level: 1,
             },
           );
           return reply?.content ?? null;

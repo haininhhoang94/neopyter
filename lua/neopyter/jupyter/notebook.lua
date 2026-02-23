@@ -391,22 +391,151 @@ end
 
 function Notebook:hover(opts)
     opts = opts or {}
+    local ESC = string.char(27)
+    local heading_aliases = {
+        signature = "Signature",
+        type = "Type",
+        ["string form"] = "String form",
+        file = "File",
+        docstring = "Docstring",
+    }
+    local heading_order = { "Signature", "Type", "String form", "File", "Docstring" }
+
+    local function strip_ansi_sequences(value)
+        if type(value) ~= "string" then
+            return value
+        end
+        return value:gsub(ESC .. "%[[%d;]*[%a]", "")
+    end
+
+    local function format_plain_payload(value)
+        if type(value) ~= "string" then
+            return nil
+        end
+        local cleaned = strip_ansi_sequences(value)
+        local lines = vim.split(cleaned, "\n", { plain = true })
+        local sections = {}
+        local body = {}
+        local current_heading
+        local found_heading = false
+        for _, line in ipairs(lines) do
+            local key, rest = line:match("^%s*([^:]-):%s*(.*)$")
+            if key and key ~= "" then
+                local normalized = vim.trim(key:lower():gsub("%s+", " "))
+                local canonical = heading_aliases[normalized]
+                if canonical then
+                    sections[canonical] = {}
+                    current_heading = canonical
+                    found_heading = true
+                    if rest ~= "" then
+                        table.insert(sections[canonical], rest)
+                    end
+                    goto continue
+                end
+            end
+            if current_heading then
+                table.insert(sections[current_heading], line)
+            else
+                table.insert(body, line)
+            end
+            ::continue::
+        end
+        if not found_heading then
+            return nil
+        end
+        local formatted = {}
+        if #body > 0 then
+            for _, entry in ipairs(body) do
+                table.insert(formatted, entry)
+            end
+            table.insert(formatted, "")
+        end
+        for _, heading in ipairs(heading_order) do
+            local section = sections[heading]
+            if section and #section > 0 then
+                table.insert(formatted, ("**%s**"):format(heading))
+                if heading == "Signature" then
+                    table.insert(formatted, "```python")
+                    for _, entry in ipairs(section) do
+                        local cleaned = strip_ansi_sequences(entry)
+                        if cleaned ~= "" then
+                            table.insert(formatted, cleaned)
+                        end
+                    end
+                    table.insert(formatted, "```")
+                elseif heading == "Docstring" then
+                    local doc_count = 0
+                    local max_doc_lines = 120
+                    for _, entry in ipairs(section) do
+                        doc_count = doc_count + 1
+                        if doc_count <= max_doc_lines then
+                            table.insert(formatted, strip_ansi_sequences(entry))
+                        end
+                    end
+                    if doc_count > max_doc_lines then
+                        table.insert(formatted, "")
+                        table.insert(formatted, "_Docstring truncated..._")
+                    end
+                else
+                    local joined = vim.trim(strip_ansi_sequences(table.concat(section, " ")))
+                    if joined ~= "" then
+                        table.insert(formatted, ("- `%s`"):format(joined:gsub("`", "\\`")))
+                    end
+                end
+                table.insert(formatted, "")
+            end
+        end
+        return formatted
+    end
+    if not self.client:is_connecting() then
+        utils.notify_warn("Neopyter has no JupyterLab client attached yet")
+        return false
+    end
     local line_text = a.fn.getline('.')
     local offset = a.fn.col('.') - 1
-    local payload = self:inspect(line_text, offset)
-    if not payload or payload.status ~= "ok" or not payload.found then
+    local ok, payload = pcall(function()
+        return self:inspect(line_text, offset)
+    end)
+    if not ok then
+        local err = tostring(payload)
+        if err:match("without client") then
+            utils.notify_warn("Neopyter has no JupyterLab client attached yet")
+            return false
+        end
+        if err:match("Method not found inspect") then
+            utils.notify_warn("Inspect RPC is unavailable on JupyterLab extension")
+            return false
+        end
+        utils.notify_error(err)
+        return false
+    end
+    if not payload or payload.status ~= "ok" then
         utils.notify_info("No inspect information available")
-        return
+        return false
     end
     local data = payload.data or {}
+    if vim.tbl_isempty(data) then
+        utils.notify_info("No inspect information available")
+        return false
+    end
     local markdown_lines = {}
-    local function append_value(value)
+    local function append_value(value, mime)
         if type(value) == "table" then
             for _, entry in ipairs(value) do
-                append_value(entry)
+                append_value(entry, mime)
             end
         elseif type(value) == "string" then
-            for _, line in ipairs(vim.split(value, "\n", { plain = true })) do
+            if mime == "text/plain" then
+                local formatted = format_plain_payload(value)
+                if formatted then
+                    for _, line in ipairs(formatted) do
+                        table.insert(markdown_lines, line)
+                    end
+                    return
+                end
+            end
+            local sanitized = strip_ansi_sequences(value)
+            for _, line in ipairs(vim.split(sanitized, "\n", { plain = true })) do
                 table.insert(markdown_lines, line)
             end
         end
@@ -414,15 +543,15 @@ function Notebook:hover(opts)
     local mime_order = { "text/markdown", "text/x-markdown", "text/plain" }
     for _, mime in ipairs(mime_order) do
         if data[mime] then
-            append_value(data[mime])
+            append_value(data[mime], mime)
             if #markdown_lines > 0 then
                 break
             end
         end
     end
     if #markdown_lines == 0 then
-        for _, value in pairs(data) do
-            append_value(value)
+        for mime, value in pairs(data) do
+            append_value(value, mime)
             if #markdown_lines > 0 then
                 break
             end
@@ -430,17 +559,24 @@ function Notebook:hover(opts)
     end
     if #markdown_lines == 0 then
         utils.notify_info("Kernel inspect returned no content")
-        return
+        return false
+    end
+    local preview_lines = vim.lsp.util.convert_input_to_markdown_lines(markdown_lines)
+    preview_lines = vim.lsp.util.trim_empty_lines(preview_lines)
+    if #preview_lines == 0 then
+        utils.notify_info("Kernel inspect returned no content")
+        return false
     end
     local preview_opts = vim.tbl_extend("force", { border = "rounded", bufnr = self.bufnr }, opts)
     local function show_preview()
-        vim.lsp.util.open_floating_preview(markdown_lines, "markdown", preview_opts)
+        vim.lsp.util.open_floating_preview(preview_lines, "markdown", preview_opts)
     end
     if vim.in_fast_event() then
         vim.schedule(show_preview)
     else
         show_preview()
     end
+    return true
 end
 
 function Notebook:run_cell_and_insert_below()
