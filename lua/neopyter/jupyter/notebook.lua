@@ -385,6 +385,57 @@ function Notebook:kernel_complete(source, offset)
     return self:_request("kernelComplete", source, offset)
 end
 
+function Notebook:inspect(source, offset)
+    return self:_request("inspect", source, offset)
+end
+
+function Notebook:hover(opts)
+    opts = opts or {}
+    local line_text = a.fn.getline('.')
+    local offset = a.fn.col('.') - 1
+    local payload = self:inspect(line_text, offset)
+    if not payload or payload.status ~= "ok" or not payload.found then
+        utils.notify_info("No inspect information available")
+        return
+    end
+    local data = payload.data or {}
+    local markdown_lines = {}
+    local function append_value(value)
+        if type(value) == "table" then
+            for _, entry in ipairs(value) do
+                append_value(entry)
+            end
+        elseif type(value) == "string" then
+            for _, line in ipairs(vim.split(value, "\n", { plain = true })) do
+                table.insert(markdown_lines, line)
+            end
+        end
+    end
+    local mime_order = { "text/markdown", "text/x-markdown", "text/plain" }
+    for _, mime in ipairs(mime_order) do
+        if data[mime] then
+            append_value(data[mime])
+            if #markdown_lines > 0 then
+                break
+            end
+        end
+    end
+    if #markdown_lines == 0 then
+        for _, value in pairs(data) do
+            append_value(value)
+            if #markdown_lines > 0 then
+                break
+            end
+        end
+    end
+    if #markdown_lines == 0 then
+        utils.notify_info("Kernel inspect returned no content")
+        return
+    end
+    local preview_opts = vim.tbl_extend("force", { border = "rounded" }, opts)
+    vim.lsp.util.open_floating_preview(markdown_lines, "markdown", preview_opts)
+end
+
 function Notebook:run_cell_and_insert_below()
     self:run_selected_cell()
     local idx = self:get_cursor_cell_pos()

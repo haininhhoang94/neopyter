@@ -198,6 +198,22 @@ Notebook:kernel_complete({source}, {offset})
     Return: ~
         (`{label: string, type: string, insertText:string, source: string}[]`)
 
+Notebook:inspect({source}, {offset})                                      *Notebook:inspect()*
+    request kernel inspect data for the current cursor location
+
+    Parameters: ~
+      • {source}  (`string`)
+      • {offset}  (`number`)
+
+    Return: ~
+        (`table?`)
+
+Notebook:hover({opts})                                                  *Notebook:hover()*
+    render kernel inspect payload in a floating markdown preview
+
+    Parameters: ~
+      • {opts}  (`table?`) floating window options passed to `vim.lsp.util.open_floating_preview`
+
 Notebook:open()                                              *Notebook:open()*
 
 Notebook:open_or_reveal()                          *Notebook:open_or_reveal()*

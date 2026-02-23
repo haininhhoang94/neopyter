@@ -142,3 +142,4 @@ doc/test.ju.py
 .docs
 .repro-cmp
 uv.lock
+docs/plans

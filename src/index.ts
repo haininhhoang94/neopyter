@@ -1,7 +1,7 @@
 import type { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import type { CompletionHandler, CompletionProviderManager, CompletionTriggerKind, KernelCompleterProvider } from '@jupyterlab/completer';
 import type { Notebook, NotebookPanel } from '@jupyterlab/notebook';
-import type { Kernel } from '@jupyterlab/services';
+import type { Kernel, KernelMessage } from '@jupyterlab/services';
 import type { WindowedList } from '@jupyterlab/ui-components';
 import type { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 import type { DockPanel } from '@lumino/widgets';
@@ -36,7 +36,7 @@ function convertCompleteSource(_item: CompletionHandler.ICompletionItem) {
 function triggerFocus(element: HTMLElement) {
   const eventType = 'onfocusin' in element ? 'focusin' : 'focus';
   const bubbles = 'onfocusin' in element;
-  let event;
+  let event: Event | undefined;
 
   if ('createEvent' in document) {
     event = document.createEvent('Event');
@@ -86,11 +86,11 @@ const neopyterPlugin: JupyterFrontEndPlugin<void> = {
     }
 
     const getNotebookModel = (path?: string) => {
-      let notebookPanel;
+      let notebookPanel: NotebookPanel | undefined;
       if (path) {
         notebookPanel = docmanager.findWidget(path) as unknown as NotebookPanel;
       }
-      let notebook = notebookPanel?.content as Notebook | undefined;
+      let notebook: Notebook | undefined = notebookPanel?.content as Notebook | undefined;
       if (!notebook) {
         const currentNotebookPanel = labShell.currentWidget as NotebookPanel;
         if (currentNotebookPanel?.isUntitled) {
@@ -454,6 +454,29 @@ const neopyterPlugin: JupyterFrontEndPlugin<void> = {
         logger.info(completionItems);
 
         return completionItems;
+      },
+      inspect: async (path: string, source: string, offset: number) => {
+        const { notebookPanel } = getNotebookModel(path);
+        await notebookPanel.sessionContext.ready;
+        const kernel = notebookPanel.sessionContext.session?.kernel;
+        if (!kernel) {
+          logger.warn('inspect failed: kernel unavailable');
+          return null;
+        }
+        try {
+          const reply: KernelMessage.IInspectReplyMsg = await kernel.requestInspect(
+            {
+              code: source,
+              cursor_pos: offset,
+              detail_level: 0,
+            },
+          );
+          return reply?.content ?? null;
+        }
+        catch (error: unknown) {
+          logger.error('inspect request failed', error);
+          return null;
+        }
       },
     };
     const cellDispatcher = {
