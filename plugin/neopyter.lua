@@ -39,6 +39,15 @@ local cmds = {
             end
         end,
     },
+    hover = {
+        execute = function()
+            if jupyter.notebook == nil then
+                utils.notify_error("Current notebook not exist in local")
+                return
+            end
+            jupyter.notebook:hover()
+        end,
+    },
     execute = {
         execute = function(command, args)
             if args ~= nil then

@@ -394,12 +394,32 @@ function Notebook:hover(opts)
     local ESC = string.char(27)
     local heading_aliases = {
         signature = "Signature",
+        ["init signature"] = "Init signature",
         type = "Type",
+        subclasses = "Subclasses",
         ["string form"] = "String form",
+        length = "Length",
         file = "File",
+        source = "Source",
         docstring = "Docstring",
+        ["init docstring"] = "Init docstring",
+        ["class docstring"] = "Class docstring",
+        ["call docstring"] = "Call docstring",
     }
-    local heading_order = { "Signature", "Type", "String form", "File", "Docstring" }
+    local heading_order = {
+        "Signature",
+        "Init signature",
+        "Type",
+        "Subclasses",
+        "String form",
+        "Length",
+        "File",
+        "Source",
+        "Docstring",
+        "Init docstring",
+        "Class docstring",
+        "Call docstring",
+    }
 
     local function strip_ansi_sequences(value)
         if type(value) ~= "string" then
@@ -450,39 +470,93 @@ function Notebook:hover(opts)
             end
             table.insert(formatted, "")
         end
+
+        local function append_scalar(label, section)
+            local joined = vim.trim(strip_ansi_sequences(table.concat(section, " ")))
+            if joined == "" then
+                return
+            end
+            if label == "Subclasses" then
+                local chunks = {}
+                local current = ""
+                local max_width = 72
+                for piece in joined:gmatch("[^,]+") do
+                    local item = vim.trim(piece)
+                    if item ~= "" then
+                        local candidate = current == "" and item or (current .. ", " .. item)
+                        if #candidate > max_width and current ~= "" then
+                            table.insert(chunks, current)
+                            current = item
+                        else
+                            current = candidate
+                        end
+                    end
+                end
+                if current ~= "" then
+                    table.insert(chunks, current)
+                end
+                if #chunks == 0 then
+                    return
+                end
+                local first_tick = chunks[1]:find("`", 1, true) and "``" or "`"
+                table.insert(formatted, ("**%s:** %s%s%s"):format(label, first_tick, chunks[1], first_tick))
+                for i = 2, #chunks do
+                    local tick = chunks[i]:find("`", 1, true) and "``" or "`"
+                    table.insert(formatted, ("%s%s%s"):format(tick, chunks[i], tick))
+                end
+                table.insert(formatted, "")
+                return
+            end
+            local tick = joined:find("`", 1, true) and "``" or "`"
+            table.insert(formatted, ("**%s:** %s%s%s"):format(label, tick, joined, tick))
+            table.insert(formatted, "")
+        end
+
+        local function append_code_block(label, section)
+            table.insert(formatted, ("**%s:**"):format(label))
+            table.insert(formatted, "```python")
+            local has_content = false
+            for _, entry in ipairs(section) do
+                local cleaned = strip_ansi_sequences(entry)
+                if cleaned ~= "" then
+                    table.insert(formatted, cleaned)
+                    has_content = true
+                end
+            end
+            if not has_content then
+                table.insert(formatted, "...")
+            end
+            table.insert(formatted, "```")
+            table.insert(formatted, "")
+        end
+
+        local function append_docstring(label, section)
+            table.insert(formatted, ("**%s:**"):format(label))
+            local doc_count = 0
+            local max_doc_lines = 120
+            for _, entry in ipairs(section) do
+                doc_count = doc_count + 1
+                if doc_count <= max_doc_lines then
+                    table.insert(formatted, strip_ansi_sequences(entry))
+                end
+            end
+            if doc_count > max_doc_lines then
+                table.insert(formatted, "")
+                table.insert(formatted, "_Docstring truncated..._")
+            end
+            table.insert(formatted, "")
+        end
+
         for _, heading in ipairs(heading_order) do
             local section = sections[heading]
             if section and #section > 0 then
-                table.insert(formatted, ("**%s**"):format(heading))
-                if heading == "Signature" then
-                    table.insert(formatted, "```python")
-                    for _, entry in ipairs(section) do
-                        local cleaned = strip_ansi_sequences(entry)
-                        if cleaned ~= "" then
-                            table.insert(formatted, cleaned)
-                        end
-                    end
-                    table.insert(formatted, "```")
-                elseif heading == "Docstring" then
-                    local doc_count = 0
-                    local max_doc_lines = 120
-                    for _, entry in ipairs(section) do
-                        doc_count = doc_count + 1
-                        if doc_count <= max_doc_lines then
-                            table.insert(formatted, strip_ansi_sequences(entry))
-                        end
-                    end
-                    if doc_count > max_doc_lines then
-                        table.insert(formatted, "")
-                        table.insert(formatted, "_Docstring truncated..._")
-                    end
+                if heading == "Signature" or heading == "Init signature" or heading == "Source" then
+                    append_code_block(heading, section)
+                elseif heading == "Docstring" or heading == "Init docstring" or heading == "Class docstring" or heading == "Call docstring" then
+                    append_docstring(heading, section)
                 else
-                    local joined = vim.trim(strip_ansi_sequences(table.concat(section, " ")))
-                    if joined ~= "" then
-                        table.insert(formatted, ("- `%s`"):format(joined:gsub("`", "\\`")))
-                    end
+                    append_scalar(heading, section)
                 end
-                table.insert(formatted, "")
             end
         end
         return formatted
