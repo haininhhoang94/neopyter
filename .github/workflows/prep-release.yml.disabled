@@ -31,6 +31,9 @@ jobs:
     steps:
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Prep Release
         id: prep-release
         uses: jupyter-server/jupyter_releaser/.github/actions/prep-release@v2

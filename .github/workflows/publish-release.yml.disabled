@@ -21,6 +21,9 @@ jobs:
     steps:
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - uses: actions/create-github-app-token@v1
         id: app-token
         with:
